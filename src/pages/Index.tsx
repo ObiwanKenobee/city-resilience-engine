@@ -4,6 +4,7 @@ import { RiskMap } from "@/components/atlas/RiskMap";
 import { ScenarioPanel } from "@/components/atlas/ScenarioPanel";
 import { DecisionPanel } from "@/components/atlas/DecisionPanel";
 import { Ticker } from "@/components/atlas/Ticker";
+import { WhatIfSimulator } from "@/components/atlas/WhatIfSimulator";
 import type { DistrictId, ScenarioId } from "@/data/nyc";
 
 const Index = () => {
@@ -11,6 +12,7 @@ const Index = () => {
   const [year, setYear] = useState(2050);
   const [selected, setSelected] = useState<DistrictId | null>("lower-manhattan");
   const [layer, setLayer] = useState<"composite" | "flood" | "heat" | "infrastructure">("composite");
+  const [whatIfOpen, setWhatIfOpen] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -18,17 +20,28 @@ const Index = () => {
       <TopBar />
 
       <main className="flex-1 grid grid-cols-1 xl:grid-cols-[340px_1fr_400px] gap-3 p-3 min-h-0">
-        {/* LEFT — scenario controls */}
         <aside className="space-y-3 min-h-0 overflow-y-auto">
           <ScenarioPanel
             value={scenario} onChange={setScenario}
             year={year} onYearChange={setYear}
             layer={layer} onLayerChange={setLayer}
           />
+          <button
+            onClick={() => setWhatIfOpen(true)}
+            className="w-full panel rounded-sm px-4 py-3 hover:border-primary/50 transition-all group relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-aurora pointer-events-none opacity-60" />
+            <div className="relative flex items-center justify-between">
+              <div className="text-left">
+                <div className="text-[10px] font-mono tracking-[0.25em] text-primary">WHAT-IF</div>
+                <div className="text-sm font-medium mt-0.5">Open Policy Mix Console</div>
+              </div>
+              <div className="text-primary group-hover:translate-x-1 transition-transform">⊞</div>
+            </div>
+          </button>
           <BriefingCard scenario={scenario} year={year} />
         </aside>
 
-        {/* CENTER — map */}
         <section className="panel rounded-sm relative min-h-[480px] xl:min-h-0 overflow-hidden">
           <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2.5 flex items-center justify-between border-b border-border bg-surface/70 backdrop-blur">
             <div>
@@ -37,7 +50,7 @@ const Index = () => {
             </div>
             <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
               <span className="ticker-dot" />
-              <span>{(9 + Math.floor(Math.random() * 3))} ZONES · 4.31M ASSETS</span>
+              <span>9 ZONES · 4.31M ASSETS</span>
             </div>
           </div>
           <div className="absolute inset-0 pt-[58px]" ref={mapRef}>
@@ -45,13 +58,14 @@ const Index = () => {
           </div>
         </section>
 
-        {/* RIGHT — decision intelligence */}
         <aside className="min-h-0">
           <DecisionPanel scenario={scenario} year={year} selected={selected} mapRef={mapRef} />
         </aside>
       </main>
 
       <Ticker scenario={scenario} year={year} />
+
+      <WhatIfSimulator open={whatIfOpen} onOpenChange={setWhatIfOpen} scenario={scenario} year={year} />
     </div>
   );
 };
