@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { TopBar } from "@/components/atlas/TopBar";
 import { RiskMap } from "@/components/atlas/RiskMap";
 import { ScenarioPanel } from "@/components/atlas/ScenarioPanel";
@@ -11,6 +11,7 @@ const Index = () => {
   const [year, setYear] = useState(2050);
   const [selected, setSelected] = useState<DistrictId | null>("lower-manhattan");
   const [layer, setLayer] = useState<"composite" | "flood" | "heat" | "infrastructure">("composite");
+  const mapRef = useRef<HTMLDivElement>(null);
 
   return (
     <div className="dark min-h-screen flex flex-col bg-background text-foreground">
@@ -39,14 +40,14 @@ const Index = () => {
               <span>{(9 + Math.floor(Math.random() * 3))} ZONES · 4.31M ASSETS</span>
             </div>
           </div>
-          <div className="absolute inset-0 pt-[58px]">
+          <div className="absolute inset-0 pt-[58px]" ref={mapRef}>
             <RiskMap scenario={scenario} year={year} selected={selected} onSelect={setSelected} layer={layer} />
           </div>
         </section>
 
         {/* RIGHT — decision intelligence */}
         <aside className="min-h-0">
-          <DecisionPanel scenario={scenario} year={year} selected={selected} />
+          <DecisionPanel scenario={scenario} year={year} selected={selected} mapRef={mapRef} />
         </aside>
       </main>
 

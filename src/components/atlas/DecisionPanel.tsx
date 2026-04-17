@@ -1,24 +1,46 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { computeCityTotals, computeRisk, DISTRICTS, DistrictId, ScenarioId, SCENARIOS, riskLabel, riskColor } from "@/data/nyc";
 import { MetricCard } from "./MetricCard";
+import { generateDecisionMemo } from "@/lib/decisionMemo";
+import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   scenario: ScenarioId;
   year: number;
   selected: DistrictId | null;
+  mapRef: React.RefObject<HTMLDivElement>;
 }
 
-export const DecisionPanel = ({ scenario, year, selected }: Props) => {
+export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
+  const { toast } = useToast();
+  const [exporting, setExporting] = useState(false);
   const totals = useMemo(() => computeCityTotals(scenario, year), [scenario, year]);
   const district = selected ? DISTRICTS.find((d) => d.id === selected)! : null;
   const districtRisk = district ? computeRisk(district, scenario, year) : null;
   const scenarioMeta = SCENARIOS.find((s) => s.id === scenario)!;
 
-  // Sparklines: 2025 → year, 8 samples
   const spark = useMemo(() => {
     const years = Array.from({ length: 8 }, (_, i) => 2025 + Math.round(((year - 2025) * i) / 7));
     return years.map((y) => computeCityTotals(scenario, y));
   }, [scenario, year]);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await generateDecisionMemo({
+        scenario, year, selected,
+        mapElement: mapRef.current,
+        onProgress: (msg) => toast({ title: "Atlas Memo", description: msg }),
+      });
+      toast({ title: "Decision memo exported", description: "PDF saved to your downloads." });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Export failed", description: "Could not generate memo.", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-3 h-full overflow-y-auto pr-1">
@@ -100,7 +122,6 @@ export const DecisionPanel = ({ scenario, year, selected }: Props) => {
                     tone={districtRisk.composite > 0.6 ? "danger" : districtRisk.composite > 0.4 ? "warning" : "good"} />
             </div>
 
-            {/* Recommendation */}
             <div className="mt-3 p-3 rounded-sm bg-primary/5 border border-primary/20">
               <div className="text-[10px] font-mono tracking-[0.2em] text-primary mb-1">→ RECOMMENDED ACTION</div>
               <div className="text-xs leading-relaxed">{recommendFor(district.id, districtRisk.composite, scenario)}</div>
@@ -114,14 +135,24 @@ export const DecisionPanel = ({ scenario, year, selected }: Props) => {
         )}
       </div>
 
-      {/* Action button */}
-      <button className="w-full panel rounded-sm px-4 py-3 hover:border-primary/50 transition-all group">
+      {/* Export */}
+      <button
+        onClick={handleExport}
+        disabled={exporting}
+        className="w-full panel rounded-sm px-4 py-3 hover:border-primary/50 transition-all group disabled:opacity-60 disabled:cursor-wait"
+      >
         <div className="flex items-center justify-between">
           <div className="text-left">
-            <div className="text-[10px] font-mono tracking-[0.25em] text-primary">EXPORT</div>
-            <div className="text-sm font-medium mt-0.5">Generate Decision Memo</div>
+            <div className="text-[10px] font-mono tracking-[0.25em] text-primary">
+              {exporting ? "GENERATING…" : "EXPORT"}
+            </div>
+            <div className="text-sm font-medium mt-0.5">
+              {exporting ? "Composing institutional memo" : "Generate Decision Memo"}
+            </div>
           </div>
-          <div className="text-primary group-hover:translate-x-1 transition-transform">→</div>
+          <div className={`text-primary transition-transform ${exporting ? "animate-pulse" : "group-hover:translate-x-1"}`}>
+            {exporting ? "◐" : "→"}
+          </div>
         </div>
       </button>
     </div>
