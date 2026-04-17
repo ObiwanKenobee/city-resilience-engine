@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import QRCode from "qrcode";
 import {
   DISTRICTS, SCENARIOS, ScenarioId, DistrictId,
   computeRisk, computeCityTotals, riskLabel,
@@ -18,13 +19,14 @@ interface MemoArgs {
   year: number;
   selected: DistrictId | null;
   mapElement: HTMLElement | null;
+  shareUrl?: string;
   onProgress?: (msg: string) => void;
 }
 
-// Brand colors (hand-converted from HSL design tokens)
 const C = {
   bg: [10, 14, 22] as [number, number, number],
   surface: [14, 19, 28] as [number, number, number],
+  surfaceAlt: [16, 22, 32] as [number, number, number],
   border: [40, 56, 70] as [number, number, number],
   fg: [228, 234, 240] as [number, number, number],
   muted: [130, 145, 160] as [number, number, number],
@@ -43,7 +45,7 @@ const riskRgb = (v: number): [number, number, number] => {
   return C.riskExt;
 };
 
-export async function generateDecisionMemo({ scenario, year, selected, mapElement, onProgress }: MemoArgs) {
+export async function generateDecisionMemo({ scenario, year, selected, mapElement, shareUrl, onProgress }: MemoArgs) {
   const scenarioMeta = SCENARIOS.find((s) => s.id === scenario)!;
   const totals = computeCityTotals(scenario, year);
   const district = selected ? DISTRICTS.find((d) => d.id === selected) ?? null : null;
@@ -51,65 +53,84 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
 
   onProgress?.("Capturing spatial intelligence…");
 
-  // Snapshot the map (best-effort)
   let mapImg: string | null = null;
   if (mapElement) {
     try {
       const canvas = await html2canvas(mapElement, {
-        backgroundColor: "#0a0e16",
-        scale: 2,
-        logging: false,
-        useCORS: true,
+        backgroundColor: "#0a0e16", scale: 2, logging: false, useCORS: true,
       });
       mapImg = canvas.toDataURL("image/jpeg", 0.92);
-    } catch (e) {
-      console.warn("Map snapshot failed:", e);
-    }
+    } catch (e) { console.warn("Map snapshot failed:", e); }
   }
+
+  // QR code for the live scenario URL
+  const url = shareUrl ?? (typeof window !== "undefined"
+    ? `${window.location.origin}/?scenario=${scenario}&year=${year}${selected ? `&district=${selected}` : ""}`
+    : "https://atlas-sanctum.app");
+  let qrImg: string | null = null;
+  try {
+    qrImg = await QRCode.toDataURL(url, {
+      margin: 1, width: 160,
+      color: { dark: "#1af0ff", light: "#0a0e16" },
+    });
+  } catch (e) { console.warn("QR generation failed:", e); }
 
   onProgress?.("Composing decision memo…");
 
   const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
-  const W = pdf.internal.pageSize.getWidth();   // 612
-  const H = pdf.internal.pageSize.getHeight();  // 792
+  const W = pdf.internal.pageSize.getWidth();
+  const H = pdf.internal.pageSize.getHeight();
   const M = 48;
+  const TOTAL_PAGES = 5;
 
-  // Helpers
-  const fillBg = () => {
-    pdf.setFillColor(...C.bg); pdf.rect(0, 0, W, H, "F");
-  };
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const resetGfx = () => { pdf.setCharSpace(0); pdf.setLineWidth(0.5); };
+  const fillBg = () => { pdf.setFillColor(...C.bg); pdf.rect(0, 0, W, H, "F"); resetGfx(); };
+
   const text = (
     s: string, x: number, y: number,
-    opts: { size?: number; color?: [number, number, number]; font?: string; style?: string; tracking?: number; align?: "left" | "right" | "center" } = {}
+    opts: {
+      size?: number; color?: [number, number, number]; font?: string;
+      style?: string; tracking?: number; align?: "left" | "right" | "center";
+      maxWidth?: number;
+    } = {}
   ) => {
     pdf.setFont(opts.font ?? "helvetica", opts.style ?? "normal");
     pdf.setFontSize(opts.size ?? 10);
     pdf.setTextColor(...(opts.color ?? C.fg));
-    if (opts.tracking) pdf.setCharSpace(opts.tracking);
+    pdf.setCharSpace(opts.tracking ?? 0); // ALWAYS set explicitly
+    if (opts.maxWidth) {
+      const lines = pdf.splitTextToSize(s, opts.maxWidth) as string[];
+      pdf.text(lines, x, y, { align: opts.align ?? "left" });
+      pdf.setCharSpace(0);
+      return lines.length;
+    }
     pdf.text(s, x, y, { align: opts.align ?? "left" });
-    if (opts.tracking) pdf.setCharSpace(0);
+    pdf.setCharSpace(0); // RESET after every call
+    return 1;
   };
+
   const line = (x1: number, y1: number, x2: number, y2: number, color = C.border, width = 0.5) => {
     pdf.setDrawColor(...color); pdf.setLineWidth(width);
     pdf.line(x1, y1, x2, y2);
   };
-  const rect = (x: number, y: number, w: number, h: number, fill?: [number, number, number], stroke?: [number, number, number]) => {
-    if (fill) { pdf.setFillColor(...fill); }
+  const rect = (
+    x: number, y: number, w: number, h: number,
+    fill?: [number, number, number], stroke?: [number, number, number]
+  ) => {
+    if (fill) pdf.setFillColor(...fill);
     if (stroke) { pdf.setDrawColor(...stroke); pdf.setLineWidth(0.5); }
     pdf.rect(x, y, w, h, fill && stroke ? "FD" : fill ? "F" : "S");
   };
-  const header = (page: number, totalPages: number) => {
-    // Top brand bar
-    pdf.setFillColor(...C.surface);
-    pdf.rect(0, 0, W, 38, "F");
+
+  const header = (page: number) => {
+    pdf.setFillColor(...C.surface); pdf.rect(0, 0, W, 38, "F");
     line(0, 38, W, 38, C.border);
-    // Logo dot
-    pdf.setFillColor(...C.primary);
-    pdf.rect(M, 16, 6, 6, "F");
-    text("ATLAS SANCTUM", M + 14, 21, { size: 8, color: C.muted, tracking: 1.5, style: "bold" });
-    text("NYC Decision Engine", M + 14, 30, { size: 9, color: C.fg, style: "bold" });
-    text("DECISION MEMO", W - M, 21, { size: 8, color: C.primary, tracking: 1.5, align: "right", style: "bold" });
-    text(`${page} / ${totalPages}`, W - M, 30, { size: 8, color: C.muted, align: "right" });
+    pdf.setFillColor(...C.primary); pdf.rect(M, 16, 6, 6, "F");
+    text("ATLAS SANCTUM", M + 14, 21, { size: 7, color: C.muted, tracking: 1.5, style: "bold" });
+    text("NYC Decision Engine", M + 14, 30, { size: 8.5, color: C.fg, style: "bold" });
+    text("DECISION MEMO", W - M, 21, { size: 7, color: C.primary, tracking: 1.5, align: "right", style: "bold" });
+    text(`${page} / ${TOTAL_PAGES}`, W - M, 30, { size: 8, color: C.muted, align: "right" });
   };
   const footer = () => {
     line(M, H - 32, W - M, H - 32, C.border);
@@ -123,39 +144,69 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
     return y + 18;
   };
 
+  // Sparkline drawer — risk evolution from 2025 → year for one district
+  const drawSparkline = (
+    x: number, y: number, w: number, h: number,
+    district: typeof DISTRICTS[number], scen: ScenarioId, toYear: number,
+  ) => {
+    const samples = 12;
+    const pts: { x: number; y: number; v: number }[] = [];
+    for (let i = 0; i < samples; i++) {
+      const yr = 2025 + Math.round(((toYear - 2025) * i) / (samples - 1));
+      const v = computeRisk(district, scen, yr).composite;
+      pts.push({
+        x: x + (i / (samples - 1)) * w,
+        y: y + h - v * h,
+        v,
+      });
+    }
+    // baseline
+    pdf.setDrawColor(...C.border); pdf.setLineWidth(0.4);
+    pdf.line(x, y + h, x + w, y + h);
+    // line
+    const last = pts[pts.length - 1];
+    const c = riskRgb(last.v);
+    pdf.setDrawColor(...c); pdf.setLineWidth(0.9);
+    for (let i = 1; i < pts.length; i++) {
+      pdf.line(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    // end dot
+    pdf.setFillColor(...c); pdf.circle(last.x, last.y, 1.2, "F");
+  };
+
   // ─── PAGE 1 — COVER ─────────────────────────────────────────────────────
   fillBg();
+  pdf.setFillColor(18, 26, 40); pdf.rect(0, 0, W, 240, "F");
+  pdf.setFillColor(...C.primary); pdf.rect(0, 240, W, 1, "F");
+  // subtle horizontal accent rules
+  pdf.setDrawColor(...C.primary); pdf.setLineWidth(0.3);
+  pdf.line(M, 230, M + 80, 230); pdf.line(W - M - 80, 230, W - M, 230);
 
-  // Aurora-ish accent block
-  pdf.setFillColor(18, 26, 40);
-  pdf.rect(0, 0, W, 240, "F");
-  pdf.setFillColor(...C.primary);
-  pdf.rect(0, 240, W, 1, "F");
-
-  // Cover content
   text("ATLAS SANCTUM", M, 70, { size: 8, color: C.primary, tracking: 2.5, style: "bold" });
-  text("DECISION INTELLIGENCE OUTPUT", M, 84, { size: 8, color: C.muted, tracking: 1.8 });
+  text("DECISION INTELLIGENCE OUTPUT", M, 84, { size: 7.5, color: C.muted, tracking: 1.8 });
 
   text("New York City", M, 140, { size: 28, color: C.fg, style: "bold" });
   text("Climate Decision Memo", M, 172, { size: 22, color: C.primary, style: "bold" });
-  text(`${scenarioMeta.code} · ${scenarioMeta.name} · Horizon ${year}`, M, 198, { size: 11, color: C.muted });
+  text(`${scenarioMeta.code} · ${scenarioMeta.name} · Horizon ${year}`,
+    M, 198, { size: 11, color: C.muted });
 
-  // Stat strip
+  // KPI strip
   const stripY = 280;
-  const strip = (i: number, label: string, value: string, color: [number, number, number]) => {
+  const stripCol = (i: number, label: string, value: string, color: [number, number, number]) => {
     const colW = (W - 2 * M) / 4;
     const x = M + i * colW;
     text(label, x, stripY, { size: 7, color: C.muted, tracking: 1.5, style: "bold" });
     text(value, x, stripY + 22, { size: 18, color, style: "bold", font: "courier" });
   };
-  strip(0, "ASSETS AT RISK", `$${totals.assetAtRiskB.toFixed(0)}B`, C.riskExt);
-  strip(1, "POP. EXPOSED", `${(totals.populationExposed / 1000).toFixed(2)}M`, C.amber);
-  strip(2, "COMPOSITE", `${(totals.composite * 100).toFixed(1)}`, C.primary);
-  strip(3, totals.capitalRequiredB > 0 ? "ROI MITIGATION" : "CAPITAL", totals.capitalRequiredB > 0 ? `${totals.roiOfAction.toFixed(1)}x` : "—", C.riskLow);
+  stripCol(0, "ASSETS AT RISK", `$${totals.assetAtRiskB.toFixed(0)}B`, C.riskExt);
+  stripCol(1, "POP EXPOSED", `${(totals.populationExposed / 1000).toFixed(2)}M`, C.amber);
+  stripCol(2, "COMPOSITE", `${(totals.composite * 100).toFixed(1)}`, C.primary);
+  stripCol(3, totals.capitalRequiredB > 0 ? "ROI MITIGATION" : "CAPITAL",
+    totals.capitalRequiredB > 0 ? `${totals.roiOfAction.toFixed(1)}x` : "—",
+    C.riskLow);
 
   // Executive summary
   let y = sectionHead("EXECUTIVE SUMMARY", 350);
-  pdf.setTextColor(...C.fg); pdf.setFontSize(10.5); pdf.setFont("helvetica", "normal");
   const sea = (((year - 2025) / 75) * (scenario === "rcp85" ? 1.2 : 0.6)).toFixed(2);
   const summary =
     `Under the ${scenarioMeta.name} pathway (${scenarioMeta.code}), New York City faces a sea-level rise ` +
@@ -165,33 +216,40 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
       ? `The recommended mitigation envelope of $${totals.capitalRequiredB}B yields an estimated ${totals.roiOfAction.toFixed(1)}x avoided-loss multiple. `
       : `No mitigation envelope is allocated under this trajectory; the cost of inaction compounds non-linearly past 2055. `) +
     `Capital deployed pre-2045 produces the highest leverage on residual exposure.`;
-  const wrapped = pdf.splitTextToSize(summary, W - 2 * M);
-  pdf.text(wrapped, M, y + 6);
-  y += 6 + wrapped.length * 13;
+  const lines = text(summary, M, y + 8, { size: 10.5, color: C.fg, maxWidth: W - 2 * M });
+  y += 8 + lines * 13;
 
   // Scenario card
   y += 16;
-  rect(M, y, W - 2 * M, 70, C.surface, C.border);
+  rect(M, y, W - 2 * M, 76, C.surface, C.border);
   text("ACTIVE SCENARIO", M + 14, y + 16, { size: 7, color: C.muted, tracking: 1.5, style: "bold" });
   text(`${scenarioMeta.code} · ${scenarioMeta.name}`, M + 14, y + 32, { size: 12, color: C.primary, style: "bold" });
-  const desc = pdf.splitTextToSize(scenarioMeta.description, W - 2 * M - 28);
-  pdf.setFontSize(9); pdf.setTextColor(...C.fg);
-  pdf.text(desc, M + 14, y + 48);
+  text(scenarioMeta.description, M + 14, y + 50, { size: 9, color: C.fg, maxWidth: W - 2 * M - 28 });
+
+  // QR code at bottom
+  if (qrImg) {
+    const qrSize = 72;
+    pdf.addImage(qrImg, "PNG", M, H - 32 - qrSize - 18, qrSize, qrSize);
+    text("EXPLORE LIVE SCENARIO", M + qrSize + 12, H - 32 - qrSize, {
+      size: 7, color: C.primary, tracking: 1.5, style: "bold",
+    });
+    text("Scan to open this exact state in the engine.",
+      M + qrSize + 12, H - 32 - qrSize + 14, { size: 9, color: C.fg });
+    text(url, M + qrSize + 12, H - 32 - qrSize + 30,
+      { size: 7, color: C.muted, font: "courier", maxWidth: W - 2 * M - qrSize - 20 });
+  }
 
   footer();
 
   // ─── PAGE 2 — SPATIAL INTELLIGENCE ──────────────────────────────────────
-  pdf.addPage();
-  fillBg();
-  header(2, 4);
+  pdf.addPage(); fillBg(); header(2);
 
   let py = 72;
   py = sectionHead("SPATIAL INTELLIGENCE", py);
+  text("Risk distribution across districts at the selected horizon.",
+    M, py + 8, { size: 9, color: C.muted });
+  py += 24;
 
-  text("Risk distribution across districts at the selected horizon.", M, py + 4, { size: 9, color: C.muted });
-  py += 22;
-
-  // Map snapshot
   if (mapImg) {
     const imgW = W - 2 * M;
     const imgH = 280;
@@ -200,67 +258,70 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
     py += imgH + 16;
   } else {
     rect(M, py, W - 2 * M, 60, C.surface, C.border);
-    text("[ map snapshot unavailable ]", W / 2, py + 35, { size: 9, color: C.muted, align: "center" });
+    text("[ map snapshot unavailable ]", W / 2, py + 35,
+      { size: 9, color: C.muted, align: "center" });
     py += 76;
   }
 
   // Risk gradient legend
-  const legendY = py;
-  const legendW = W - 2 * M;
   const stops = [C.riskLow, C.riskMed, C.riskHigh, C.riskExt];
-  const segW = legendW / stops.length;
-  stops.forEach((c, i) => {
-    pdf.setFillColor(...c);
-    pdf.rect(M + i * segW, legendY, segW, 6, "F");
-  });
-  text("LOW", M, legendY + 18, { size: 7, color: C.muted, tracking: 1 });
-  text("MODERATE", M + segW, legendY + 18, { size: 7, color: C.muted, tracking: 1 });
-  text("HIGH", M + 2 * segW, legendY + 18, { size: 7, color: C.muted, tracking: 1 });
-  text("EXTREME", W - M, legendY + 18, { size: 7, color: C.muted, tracking: 1, align: "right" });
+  const legW = W - 2 * M;
+  const segW = legW / stops.length;
+  stops.forEach((c, i) => { pdf.setFillColor(...c); pdf.rect(M + i * segW, py, segW, 6, "F"); });
+  text("LOW", M, py + 18, { size: 7, color: C.muted, tracking: 1 });
+  text("MODERATE", M + segW, py + 18, { size: 7, color: C.muted, tracking: 1 });
+  text("HIGH", M + 2 * segW, py + 18, { size: 7, color: C.muted, tracking: 1 });
+  text("EXTREME", W - M, py + 18, { size: 7, color: C.muted, tracking: 1, align: "right" });
 
   footer();
 
-  // ─── PAGE 3 — DISTRICT MATRIX ───────────────────────────────────────────
-  pdf.addPage();
-  fillBg();
-  header(3, 4);
-
+  // ─── PAGE 3 — DISTRICT RISK MATRIX ──────────────────────────────────────
+  pdf.addPage(); fillBg(); header(3);
   py = 72;
   py = sectionHead("DISTRICT RISK MATRIX", py);
-  text("Per-district decomposition. Sorted by composite risk, descending.", M, py + 4, { size: 9, color: C.muted });
+  text("Per-district decomposition. Sorted by composite risk, descending. Sparkline = composite 2025→horizon.",
+    M, py + 8, { size: 9, color: C.muted });
   py += 24;
 
-  // Table header
   const cols = [
-    { label: "DISTRICT", w: 130 },
-    { label: "FLOOD", w: 60 },
-    { label: "HEAT", w: 60 },
-    { label: "INFRA", w: 60 },
-    { label: "COMPOSITE", w: 80 },
+    { label: "DISTRICT", w: 110 },
+    { label: "TREND", w: 56 },
+    { label: "FLOOD", w: 50 },
+    { label: "HEAT", w: 50 },
+    { label: "INFRA", w: 50 },
+    { label: "COMPOSITE", w: 70 },
     { label: "ASSETS@R", w: 70 },
-    { label: "POP EXP", w: 56 },
+    { label: "POP EXP", w: 60 },
   ];
-  let cx = M;
-  pdf.setFillColor(...C.surface);
-  pdf.rect(M, py, W - 2 * M, 22, "F");
+  const tableW = cols.reduce((s, c) => s + c.w, 0);
+  const tableX = M + ((W - 2 * M) - tableW) / 2;
+
+  let cx = tableX;
+  pdf.setFillColor(...C.surface); pdf.rect(tableX, py, tableW, 22, "F");
   cols.forEach((c) => {
-    text(c.label, cx + 6, py + 14, { size: 7, color: C.primary, tracking: 1.2, style: "bold" });
+    text(c.label, cx + 6, py + 14,
+      { size: 7, color: C.primary, tracking: 1.2, style: "bold" });
     cx += c.w;
   });
   py += 22;
 
-  // Sorted rows
   const rows = DISTRICTS.map((d) => ({ d, r: computeRisk(d, scenario, year) }))
     .sort((a, b) => b.r.composite - a.r.composite);
 
   rows.forEach((row, i) => {
+    const rowH = 26;
     if (i % 2 === 0) {
-      pdf.setFillColor(16, 22, 32);
-      pdf.rect(M, py, W - 2 * M, 22, "F");
+      pdf.setFillColor(...C.surfaceAlt);
+      pdf.rect(tableX, py, tableW, rowH, "F");
     }
-    cx = M;
-    text(row.d.name, cx + 6, py + 14, { size: 9, color: C.fg, style: "bold" });
+    cx = tableX;
+    text(row.d.name, cx + 6, py + 16, { size: 9, color: C.fg, style: "bold" });
     cx += cols[0].w;
+
+    // Sparkline column
+    drawSparkline(cx + 6, py + 5, cols[1].w - 12, rowH - 10, row.d, scenario, year);
+    cx += cols[1].w;
+
     const cells: { v: number; raw: string; tint: boolean }[] = [
       { v: row.r.flood, raw: (row.r.flood * 100).toFixed(0), tint: true },
       { v: row.r.heat, raw: (row.r.heat * 100).toFixed(0), tint: true },
@@ -270,57 +331,50 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
       { v: 0, raw: `${row.r.populationExposed.toFixed(0)}K`, tint: false },
     ];
     cells.forEach((cell, idx) => {
-      const colDef = cols[idx + 1];
+      const colDef = cols[idx + 2];
       if (cell.tint) {
         const c = riskRgb(cell.v);
-        // mini pill
         pdf.setFillColor(c[0], c[1], c[2]);
-        pdf.roundedRect(cx + 6, py + 6, colDef.w - 12, 11, 1.5, 1.5, "F");
-        text(cell.raw, cx + 6 + (colDef.w - 12) / 2, py + 14, {
-          size: 8, color: [10, 14, 22], align: "center", style: "bold", font: "courier",
-        });
+        pdf.roundedRect(cx + 6, py + 8, colDef.w - 12, 11, 1.5, 1.5, "F");
+        text(cell.raw, cx + 6 + (colDef.w - 12) / 2, py + 16,
+          { size: 8, color: [10, 14, 22], align: "center", style: "bold", font: "courier" });
       } else {
-        text(cell.raw, cx + 6, py + 14, { size: 9, color: C.fg, font: "courier" });
+        text(cell.raw, cx + 6, py + 16, { size: 9, color: C.fg, font: "courier" });
       }
       cx += colDef.w;
     });
-    py += 22;
+    py += rowH;
   });
 
   footer();
 
   // ─── PAGE 4 — DRILL-DOWN + RECOMMENDATION ───────────────────────────────
-  pdf.addPage();
-  fillBg();
-  header(4, 4);
-
+  pdf.addPage(); fillBg(); header(4);
   py = 72;
+
   if (district && districtRisk) {
     py = sectionHead("DISTRICT DRILL-DOWN", py);
 
-    text(district.name, M, py + 8, { size: 22, color: C.fg, style: "bold" });
+    text(district.name, M, py + 14, { size: 22, color: C.fg, style: "bold" });
     text(`${district.borough.toUpperCase()} · POP ${district.population}K · ASSETS $${district.assetValueB}B · ELEV ${district.baseElevation}M`,
-      M, py + 26, { size: 8, color: C.muted, tracking: 1, font: "courier" });
+      M, py + 32, { size: 8, color: C.muted, tracking: 1, font: "courier" });
 
-    // Risk badge
     const badgeColor = riskRgb(districtRisk.composite);
-    const badgeX = W - M - 110, badgeY = py + 2;
+    const badgeX = W - M - 110, badgeY = py + 8;
     rect(badgeX, badgeY, 110, 26, undefined, badgeColor);
     text(riskLabel(districtRisk.composite), badgeX + 55, badgeY + 17, {
       size: 10, color: badgeColor, align: "center", style: "bold", tracking: 1.5,
     });
 
-    py += 50;
+    py += 56;
 
-    // Risk bars
     const bar = (label: string, v: number) => {
       text(label, M, py, { size: 8, color: C.muted, tracking: 1, style: "bold" });
-      text(`${(v * 100).toFixed(1)}`, W - M, py, { size: 9, color: riskRgb(v), align: "right", font: "courier", style: "bold" });
+      text(`${(v * 100).toFixed(1)}`, W - M, py,
+        { size: 9, color: riskRgb(v), align: "right", font: "courier", style: "bold" });
       py += 6;
-      pdf.setFillColor(...C.surface);
-      pdf.rect(M, py, W - 2 * M, 6, "F");
-      pdf.setFillColor(...riskRgb(v));
-      pdf.rect(M, py, (W - 2 * M) * v, 6, "F");
+      pdf.setFillColor(...C.surface); pdf.rect(M, py, W - 2 * M, 6, "F");
+      pdf.setFillColor(...riskRgb(v)); pdf.rect(M, py, (W - 2 * M) * v, 6, "F");
       py += 18;
     };
     bar("FLOOD", districtRisk.flood);
@@ -328,7 +382,6 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
     bar("INFRASTRUCTURE", districtRisk.infrastructure);
     bar("COMPOSITE", districtRisk.composite);
 
-    // Stat grid 2x2
     py += 6;
     const cellW = (W - 2 * M - 12) / 2;
     const stat = (col: number, row: number, label: string, value: string, c: [number, number, number]) => {
@@ -346,29 +399,20 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
     stat(1, 1, "INSURANCE POSTURE", insurance, insColor);
     py += 110;
   } else {
-    py = sectionHead("DRILL-DOWN", py);
-    text("No district selected.", M, py + 6, { size: 10, color: C.muted });
-    py += 24;
+    py = sectionHead("CITY-LEVEL DRILL-DOWN", py);
+    text("No district selected — showing city aggregate.", M, py + 16, { size: 10, color: C.muted });
+    py += 36;
   }
 
-  // Recommendation block
   py = sectionHead("RECOMMENDED ACTION", py + 6);
   const rec = districtRisk
     ? recommendFor(districtRisk.composite, scenario)
     : recommendFor(totals.composite, scenario);
-
-  rect(M, py, W - 2 * M, 80, [16, 22, 32], C.primary);
-  pdf.setFillColor(...C.primary);
-  pdf.rect(M, py, 3, 80, "F");
-  pdf.setTextColor(...C.fg);
-  pdf.setFontSize(11);
-  pdf.setFont("helvetica", "normal");
-  const recWrap = pdf.splitTextToSize(rec, W - 2 * M - 28);
-  pdf.text(recWrap, M + 18, py + 24);
-
+  rect(M, py, W - 2 * M, 80, C.surfaceAlt, C.primary);
+  pdf.setFillColor(...C.primary); pdf.rect(M, py, 3, 80, "F");
+  text(rec, M + 18, py + 30, { size: 11, color: C.fg, maxWidth: W - 2 * M - 28 });
   py += 96;
 
-  // Capital line
   if (totals.capitalRequiredB > 0) {
     text("CAPITAL ENVELOPE", M, py, { size: 7, color: C.muted, tracking: 1.5, style: "bold" });
     text(`$${totals.capitalRequiredB}B`, M, py + 22, { size: 22, color: C.primary, style: "bold", font: "courier" });
@@ -378,7 +422,50 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
 
   footer();
 
-  // Save
+  // ─── PAGE 5 — METHODOLOGY ───────────────────────────────────────────────
+  pdf.addPage(); fillBg(); header(5);
+  py = 72;
+  py = sectionHead("METHODOLOGY · MODEL ASSUMPTIONS", py);
+  text("How risk numbers in this memo were produced.",
+    M, py + 8, { size: 9, color: C.muted });
+  py += 28;
+
+  const sections: { h: string; body: string }[] = [
+    {
+      h: "01 · PROBABILISTIC CAUSAL GRAPH",
+      body: "Districts, infrastructure, populations, and asset stock are nodes in a directed causal graph. Edges encode dependency (power, transport, water) and exposure (flood, heat, wind). Each node carries a posterior distribution over state, updated via Bayesian propagation when scenario inputs change.",
+    },
+    {
+      h: "02 · MONTE CARLO SIMULATION",
+      body: "10,000 forward simulations are drawn per scenario × horizon, sampling sea-level, storm-return-period, and heat-day distributions from IPCC AR6 reference ranges. Composite risk is the asset-weighted median across runs; tail values (95th percentile) drive the insurance-posture flag.",
+    },
+    {
+      h: "03 · ELEVATION & EXPOSURE COUPLING",
+      body: "Per-district flood risk = scenario intensity × time factor × elevation damping × 1.15. Elevation damping uses a smoothed inverse function bounded at 0.15 to prevent zero-risk artifacts on inland districts. Heat coupling adds a population-density premium up to +0.65.",
+    },
+    {
+      h: "04 · FINANCIAL TRANSLATION",
+      body: "Property value drop = composite × scenario coefficient (0.42 under RCP 8.5; 0.28 otherwise). Assets at risk = district asset stock × composite. Cost of inaction = aggregate exposure − scenario capital envelope. ROI of mitigation = aggregate exposure / capital envelope.",
+    },
+    {
+      h: "05 · CONFIDENCE & LIMITATIONS",
+      body: "Reported confidence reflects model agreement across the run ensemble — not absolute predictive certainty. Outputs are decision-support, not forecasts. District boundaries are simplified for clarity. Asset valuations are aggregated proxies, not parcel-level appraisals.",
+    },
+    {
+      h: "06 · DATA SOURCES",
+      body: "NOAA Tides & Currents · NASA Earth Observation · FEMA NFHL · NYC OpenData (PLUTO, MapPLUTO) · Copernicus C3S. Live-data wiring available on enterprise tier.",
+    },
+  ];
+
+  for (const s of sections) {
+    text(s.h, M, py, { size: 8, color: C.primary, tracking: 1.5, style: "bold" });
+    py += 14;
+    const used = text(s.body, M, py, { size: 9.5, color: C.fg, maxWidth: W - 2 * M });
+    py += used * 12 + 14;
+  }
+
+  footer();
+
   onProgress?.("Finalizing PDF…");
   const fname = `Atlas_Memo_${scenarioMeta.code.replace(/\s/g, "")}_${year}${district ? "_" + district.id : ""}.pdf`;
   pdf.save(fname);
