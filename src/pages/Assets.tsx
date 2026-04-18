@@ -166,8 +166,8 @@ const Assets = () => {
             </div>
           ) : (
             <>
-              {/* KPIs */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* KPIs + Export */}
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <Kpi label="ASSETS" value={`${roll.totalAssets}`} sub="evaluated" tone="primary" />
                 <Kpi label="PORTFOLIO VALUE" value={`$${(roll.totalValueM / 1000).toFixed(2)}B`}
                      sub={`${roll.totalAssets} assets`} tone="primary" />
@@ -175,6 +175,16 @@ const Assets = () => {
                      sub={`${((roll.totalExposureM / roll.totalValueM) * 100).toFixed(1)}% of value`} tone="warning" />
                 <Kpi label="VaR (95%)" value={`$${(roll.totalVaR95M / 1000).toFixed(2)}B`}
                      sub={`weighted comp. ${(roll.weightedComposite * 100).toFixed(1)}`} tone="danger" />
+                <button onClick={onExport} disabled={exporting}
+                  className="panel rounded-sm p-3.5 text-left hover:border-primary/50 transition-all group disabled:opacity-60 disabled:cursor-wait">
+                  <div className="text-[10px] font-mono tracking-[0.25em] text-primary">
+                    {exporting ? "GENERATING…" : "EXPORT"}
+                  </div>
+                  <div className="text-sm font-medium mt-1.5">Underwriter Brief</div>
+                  <div className="text-[10px] text-muted-foreground mt-1 group-hover:text-foreground transition-colors">
+                    PDF · 4 pages →
+                  </div>
+                </button>
               </div>
 
               {/* District concentration */}
