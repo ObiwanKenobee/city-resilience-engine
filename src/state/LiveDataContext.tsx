@@ -40,7 +40,16 @@ export const LiveDataProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: e } = await supabase
+      const { data, error: e } = await (supabase as unknown as {
+        from: (t: string) => {
+          select: (s: string) => {
+            in: (col: string, vals: string[]) => Promise<{
+              data: Array<{ source: string; payload: Record<string, unknown>; fetched_at: string }> | null;
+              error: { message: string } | null;
+            }>;
+          };
+        };
+      })
         .from("live_data_cache")
         .select("source, payload, fetched_at")
         .in("source", ["noaa_battery", "nyc_flood_zones"]);
