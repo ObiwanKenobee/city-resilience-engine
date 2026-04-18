@@ -73,6 +73,32 @@ export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
         <div className="text-[11px] text-muted-foreground mt-2 leading-relaxed">{scenarioMeta.description}</div>
       </div>
 
+      {/* What-If active banner */}
+      {whatIfActive && (
+        <div className="panel rounded-sm px-4 py-3 border-primary/40 animate-float-up relative overflow-hidden">
+          <div className="absolute inset-0 bg-aurora pointer-events-none" />
+          <div className="relative flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-mono tracking-[0.25em] text-primary flex items-center gap-2">
+                <span className="ticker-dot" /> WHAT-IF MIX ACTIVE
+              </div>
+              <div className="text-xs mt-1">
+                <span className="text-muted-foreground">Avoided loss</span>{" "}
+                <span className="font-mono text-risk-low tabular">${whatIf.avoidedLossB.toFixed(0)}B</span>{" "}
+                <span className="text-muted-foreground">· ROI</span>{" "}
+                <span className="font-mono text-risk-low tabular">{whatIf.blendedROI.toFixed(1)}x</span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[10px] font-mono text-muted-foreground">CAPITAL</div>
+              <div className="text-base font-mono font-semibold text-primary tabular">
+                ${whatIf.mix.totalCapitalB.toFixed(1)}B
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* City-level KPIs */}
       <div className="grid grid-cols-2 gap-2">
         <MetricCard
@@ -149,26 +175,36 @@ export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
         )}
       </div>
 
-      {/* Export */}
-      <button
-        onClick={handleExport}
-        disabled={exporting}
-        className="w-full panel rounded-sm px-4 py-3 hover:border-primary/50 transition-all group disabled:opacity-60 disabled:cursor-wait"
-      >
-        <div className="flex items-center justify-between">
-          <div className="text-left">
-            <div className="text-[10px] font-mono tracking-[0.25em] text-primary">
-              {exporting ? "GENERATING…" : "EXPORT"}
+      {/* Export + Share */}
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="panel rounded-sm px-4 py-3 hover:border-primary/50 transition-all group disabled:opacity-60 disabled:cursor-wait"
+        >
+          <div className="flex items-center justify-between">
+            <div className="text-left">
+              <div className="text-[10px] font-mono tracking-[0.25em] text-primary">
+                {exporting ? "GENERATING…" : "EXPORT"}
+              </div>
+              <div className="text-sm font-medium mt-0.5">
+                {exporting ? "Composing institutional memo" : "Generate Decision Memo"}
+              </div>
             </div>
-            <div className="text-sm font-medium mt-0.5">
-              {exporting ? "Composing institutional memo" : "Generate Decision Memo"}
+            <div className={`text-primary transition-transform ${exporting ? "animate-pulse" : "group-hover:translate-x-1"}`}>
+              {exporting ? "◐" : "→"}
             </div>
           </div>
-          <div className={`text-primary transition-transform ${exporting ? "animate-pulse" : "group-hover:translate-x-1"}`}>
-            {exporting ? "◐" : "→"}
-          </div>
-        </div>
-      </button>
+        </button>
+        <button
+          onClick={copyShareLink}
+          title="Copy live scenario URL"
+          className="panel rounded-sm px-3 hover:border-primary/50 transition-all flex flex-col items-center justify-center group"
+        >
+          <div className="text-primary text-base group-hover:scale-110 transition-transform">⎘</div>
+          <div className="text-[9px] font-mono tracking-[0.2em] text-muted-foreground mt-0.5">SHARE</div>
+        </button>
+      </div>
     </div>
   );
 };
