@@ -281,11 +281,23 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
   pdf.addPage(); fillBg(); header(3);
   py = 72;
   py = sectionHead("DISTRICT RISK MATRIX", py);
-  text("Per-district decomposition. Sorted by composite risk, descending. Sparkline = composite 2025→horizon.",
-    M, py + 8, { size: 9, color: C.muted });
+  text(whatIf
+    ? "Per-district decomposition. Sorted by composite risk. Sparkline = composite 2025→horizon. MIT column shows residual after What-If mix."
+    : "Per-district decomposition. Sorted by composite risk, descending. Sparkline = composite 2025→horizon.",
+    M, py + 8, { size: 9, color: C.muted, maxWidth: W - 2 * M });
   py += 24;
 
-  const cols = [
+  const cols = whatIf ? [
+    { label: "DISTRICT", w: 100 },
+    { label: "TREND", w: 48 },
+    { label: "FLOOD", w: 44 },
+    { label: "HEAT", w: 44 },
+    { label: "INFRA", w: 44 },
+    { label: "COMP", w: 50 },
+    { label: "MIT", w: 50 },
+    { label: "ASSETS@R", w: 64 },
+    { label: "POP EXP", w: 56 },
+  ] : [
     { label: "DISTRICT", w: 110 },
     { label: "TREND", w: 56 },
     { label: "FLOOD", w: 50 },
@@ -324,14 +336,28 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
     drawSparkline(cx + 6, py + 5, cols[1].w - 12, rowH - 10, row.d, scenario, year);
     cx += cols[1].w;
 
-    const cells: { v: number; raw: string; tint: boolean }[] = [
+    // Mitigated composite from active mix
+    const mitComp = whatIf
+      ? row.r.composite *
+        (0.45 * whatIf.result.mix.flood +
+         0.3 * whatIf.result.mix.heat +
+         0.25 * whatIf.result.mix.infra)
+      : 0;
+
+    type Cell = { v: number; raw: string; tint: boolean };
+    const baseCells: Cell[] = [
       { v: row.r.flood, raw: (row.r.flood * 100).toFixed(0), tint: true },
       { v: row.r.heat, raw: (row.r.heat * 100).toFixed(0), tint: true },
       { v: row.r.infrastructure, raw: (row.r.infrastructure * 100).toFixed(0), tint: true },
       { v: row.r.composite, raw: (row.r.composite * 100).toFixed(0), tint: true },
+    ];
+    const mitCell: Cell[] = whatIf ? [{ v: mitComp, raw: (mitComp * 100).toFixed(0), tint: true }] : [];
+    const tailCells: Cell[] = [
       { v: 0, raw: `$${row.r.assetAtRiskB.toFixed(1)}B`, tint: false },
       { v: 0, raw: `${row.r.populationExposed.toFixed(0)}K`, tint: false },
     ];
+    const cells = [...baseCells, ...mitCell, ...tailCells];
+
     cells.forEach((cell, idx) => {
       const colDef = cols[idx + 2];
       if (cell.tint) {
