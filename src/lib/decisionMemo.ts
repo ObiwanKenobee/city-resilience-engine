@@ -5,6 +5,7 @@ import {
   DISTRICTS, SCENARIOS, ScenarioId, DistrictId,
   computeRisk, computeCityTotals, riskLabel,
 } from "@/data/nyc";
+import { Allocation, computeWhatIf, LEVERS } from "@/data/whatif";
 
 const recommendFor = (c: number, scenario: ScenarioId): string => {
   if (scenario === "retreat") return "Phase buyouts over 15 years. Transfer density to upland nodes. Capital recoverable via density credits and avoided loss.";
@@ -20,6 +21,7 @@ interface MemoArgs {
   selected: DistrictId | null;
   mapElement: HTMLElement | null;
   shareUrl?: string;
+  whatIf?: { alloc: Allocation; result: ReturnType<typeof computeWhatIf> };
   onProgress?: (msg: string) => void;
 }
 
@@ -45,7 +47,7 @@ const riskRgb = (v: number): [number, number, number] => {
   return C.riskExt;
 };
 
-export async function generateDecisionMemo({ scenario, year, selected, mapElement, shareUrl, onProgress }: MemoArgs) {
+export async function generateDecisionMemo({ scenario, year, selected, mapElement, shareUrl, whatIf, onProgress }: MemoArgs) {
   const scenarioMeta = SCENARIOS.find((s) => s.id === scenario)!;
   const totals = computeCityTotals(scenario, year);
   const district = selected ? DISTRICTS.find((d) => d.id === selected) ?? null : null;
