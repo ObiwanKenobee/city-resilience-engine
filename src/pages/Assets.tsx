@@ -54,6 +54,23 @@ const Assets = () => {
   const setScenario = (s: ScenarioId) => { params.set("scenario", s); setParams(params); };
   const setYear = (y: number) => { params.set("year", String(y)); setParams(params); };
 
+  const onExport = async () => {
+    if (!roll || exporting) return;
+    setExporting(true);
+    try {
+      await generateAssetMemo({
+        scenario, year, exposures, roll,
+        onProgress: (msg) => toast({ title: "Underwriter brief", description: msg }),
+      });
+      toast({ title: "Portfolio brief exported", description: "PDF saved to your downloads." });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Export failed", description: "Could not generate brief.", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="dark min-h-screen flex flex-col bg-background text-foreground">
       <TopBar />
