@@ -8,6 +8,7 @@ import {
 } from "@/data/assets";
 import { ScenarioId, SCENARIOS, riskColor } from "@/data/nyc";
 import { useToast } from "@/hooks/use-toast";
+import { generateAssetMemo } from "@/lib/assetMemo";
 
 const Assets = () => {
   const { toast } = useToast();
@@ -17,6 +18,7 @@ const Assets = () => {
 
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<ReturnType<typeof parseAssetText> | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const exposures = useMemo<AssetExposure[]>(() => {
     if (!parsed?.rows.length) return [];
