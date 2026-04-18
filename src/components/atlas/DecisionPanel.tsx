@@ -3,6 +3,7 @@ import { computeCityTotals, computeRisk, DISTRICTS, DistrictId, ScenarioId, SCEN
 import { MetricCard } from "./MetricCard";
 import { generateDecisionMemo } from "@/lib/decisionMemo";
 import { useToast } from "@/hooks/use-toast";
+import { useWhatIf } from "@/state/WhatIfContext";
 
 interface Props {
   scenario: ScenarioId;
@@ -13,11 +14,13 @@ interface Props {
 
 export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
   const { toast } = useToast();
+  const { isActive: whatIfActive, alloc, computeFor } = useWhatIf();
   const [exporting, setExporting] = useState(false);
   const totals = useMemo(() => computeCityTotals(scenario, year), [scenario, year]);
   const district = selected ? DISTRICTS.find((d) => d.id === selected)! : null;
   const districtRisk = district ? computeRisk(district, scenario, year) : null;
   const scenarioMeta = SCENARIOS.find((s) => s.id === scenario)!;
+  const whatIf = useMemo(() => computeFor(scenario, year), [computeFor, scenario, year]);
 
   const spark = useMemo(() => {
     const years = Array.from({ length: 8 }, (_, i) => 2025 + Math.round(((year - 2025) * i) / 7));
@@ -31,6 +34,7 @@ export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
       await generateDecisionMemo({
         scenario, year, selected,
         mapElement: mapRef.current,
+        whatIf: whatIfActive ? { alloc, result: whatIf } : undefined,
         onProgress: (msg) => toast({ title: "Atlas Memo", description: msg }),
       });
       toast({ title: "Decision memo exported", description: "PDF saved to your downloads." });
@@ -39,6 +43,16 @@ export const DecisionPanel = ({ scenario, year, selected, mapRef }: Props) => {
       toast({ title: "Export failed", description: "Could not generate memo.", variant: "destructive" });
     } finally {
       setExporting(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    const url = `${window.location.origin}/?scenario=${scenario}&year=${year}${selected ? `&district=${selected}` : ""}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ title: "Link copied", description: "Same scenario state — paste anywhere." });
+    } catch {
+      toast({ title: "Copy failed", description: url, variant: "destructive" });
     }
   };
 
