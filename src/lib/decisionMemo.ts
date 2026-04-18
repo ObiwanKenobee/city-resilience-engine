@@ -83,7 +83,7 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
   const W = pdf.internal.pageSize.getWidth();
   const H = pdf.internal.pageSize.getHeight();
   const M = 48;
-  const TOTAL_PAGES = 5;
+  const TOTAL_PAGES = whatIf ? 6 : 5;
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const resetGfx = () => { pdf.setCharSpace(0); pdf.setLineWidth(0.5); };
