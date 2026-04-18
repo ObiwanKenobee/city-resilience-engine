@@ -494,7 +494,91 @@ export async function generateDecisionMemo({ scenario, year, selected, mapElemen
 
   footer();
 
+  // ─── PAGE 6 — WHAT-IF MIX (only if active) ──────────────────────────────
+  if (whatIf) {
+    pdf.addPage(); fillBg(); header(6);
+    py = 72;
+    py = sectionHead("WHAT-IF POLICY MIX", py);
+    text("Custom capital allocation overlaid on the active scenario. Residual values shown below.",
+      M, py + 8, { size: 9, color: C.muted, maxWidth: W - 2 * M });
+    py += 28;
+
+    // KPI strip
+    const kpiH = 64;
+    const kpiW = (W - 2 * M - 24) / 4;
+    const kpi = (i: number, label: string, value: string, color: [number, number, number]) => {
+      const x = M + i * (kpiW + 8);
+      rect(x, py, kpiW, kpiH, C.surface, C.border);
+      text(label, x + 10, py + 16, { size: 7, color: C.muted, tracking: 1.5, style: "bold" });
+      text(value, x + 10, py + 44, { size: 18, color, style: "bold", font: "courier" });
+    };
+    kpi(0, "TOTAL CAPITAL", `$${whatIf.result.mix.totalCapitalB.toFixed(1)}B`, C.primary);
+    kpi(1, "AVOIDED LOSS", `$${whatIf.result.avoidedLossB.toFixed(0)}B`, C.riskLow);
+    kpi(2, "BLENDED ROI", whatIf.result.mix.totalCapitalB > 0 ? `${whatIf.result.blendedROI.toFixed(1)}x` : "—",
+      whatIf.result.blendedROI >= 1 ? C.riskLow : C.amber);
+    kpi(3, "POP SAVED", `${(whatIf.result.avoidedPopK / 1000).toFixed(2)}M`, C.primary);
+    py += kpiH + 24;
+
+    // Lever breakdown
+    text("LEVER ALLOCATION", M, py, { size: 8, color: C.primary, tracking: 1.5, style: "bold" });
+    py += 16;
+    LEVERS.forEach((l) => {
+      const cap = whatIf.alloc[l.id];
+      const eff = whatIf.result.mix.perLever[l.id];
+      const pctCap = cap / l.saturationB;
+      // Row
+      rect(M, py, W - 2 * M, 36, C.surface, C.border);
+      text(`${l.code} · ${l.name}`, M + 12, py + 14, { size: 9, color: C.fg, style: "bold" });
+      text(l.blurb, M + 12, py + 28, { size: 7.5, color: C.muted, maxWidth: 280 });
+      // capital
+      text(`$${cap.toFixed(1)}B`, W - M - 100, py + 18,
+        { size: 12, color: C.primary, font: "courier", style: "bold", align: "right" });
+      text(`${(pctCap * 100).toFixed(0)}% of $${l.saturationB}B max`, W - M - 100, py + 30,
+        { size: 7, color: C.muted, align: "right" });
+      // effect bar
+      pdf.setFillColor(...C.surfaceAlt);
+      pdf.rect(W - M - 90, py + 14, 80, 6, "F");
+      pdf.setFillColor(...C.primary);
+      pdf.rect(W - M - 90, py + 14, 80 * eff, 6, "F");
+      text(`EFFECT ${(eff * 100).toFixed(0)}%`, W - M - 90, py + 30,
+        { size: 7, color: C.muted, font: "courier" });
+      py += 42;
+    });
+
+    py += 8;
+    text("RESIDUAL RISK VECTORS", M, py, { size: 8, color: C.primary, tracking: 1.5, style: "bold" });
+    py += 14;
+    const vecBar = (label: string, mit: number) => {
+      const reduced = (1 - mit) * 100;
+      text(label, M, py + 10, { size: 8, color: C.fg, style: "bold" });
+      text(`−${reduced.toFixed(0)}% reduction`, W - M, py + 10,
+        { size: 8, color: C.riskLow, align: "right", font: "courier" });
+      py += 16;
+      pdf.setFillColor(...C.surface); pdf.rect(M, py, W - 2 * M, 7, "F");
+      pdf.setFillColor(...C.riskLow); pdf.rect(M, py, (W - 2 * M) * (1 - mit), 7, "F");
+      pdf.setFillColor(...C.riskExt); pdf.rect(M + (W - 2 * M) * (1 - mit), py, (W - 2 * M) * mit, 7, "F");
+      py += 18;
+    };
+    vecBar("FLOOD", whatIf.result.mix.flood);
+    vecBar("HEAT", whatIf.result.mix.heat);
+    vecBar("INFRASTRUCTURE", whatIf.result.mix.infra);
+
+    py += 8;
+    rect(M, py, W - 2 * M, 60, C.surfaceAlt, C.primary);
+    pdf.setFillColor(...C.primary); pdf.rect(M, py, 3, 60, "F");
+    text("VERDICT", M + 18, py + 18, { size: 8, color: C.primary, tracking: 1.5, style: "bold" });
+    const verdict =
+      whatIf.result.mix.totalCapitalB === 0 ? "No capital deployed."
+      : whatIf.result.blendedROI > 5 ? "Exceptional leverage. Recommend full commitment of this allocation."
+      : whatIf.result.blendedROI > 2.5 ? "Strong portfolio. Marginal returns positive across all vectors."
+      : whatIf.result.blendedROI > 1 ? "Net positive but sub-optimal. Reallocate toward thermal or structural levers."
+      : "Diminishing returns dominate. Trim coastal allocation; shift to zoning + cooling.";
+    text(verdict, M + 18, py + 38, { size: 10, color: C.fg, maxWidth: W - 2 * M - 28 });
+
+    footer();
+  }
+
   onProgress?.("Finalizing PDF…");
-  const fname = `Atlas_Memo_${scenarioMeta.code.replace(/\s/g, "")}_${year}${district ? "_" + district.id : ""}.pdf`;
+  const fname = `Atlas_Memo_${scenarioMeta.code.replace(/\s/g, "")}_${year}${district ? "_" + district.id : ""}${whatIf ? "_whatif" : ""}.pdf`;
   pdf.save(fname);
 }
