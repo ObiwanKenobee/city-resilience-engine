@@ -1,6 +1,7 @@
-// FEMA National Flood Hazard Layer (NFHL) — Flood Hazard Areas (S_Fld_Haz_Ar)
-// Filtered to the five NYC counties via DFIRM_ID prefix 36 (NY) and county codes.
-// Returns total polygon count + high-risk (V/A zones) count for the city.
+// NYC Open Data — Flood Vulnerability Index (mrjc-v9pm)
+// Per–census-tract scoring of stormwater + storm-surge flood risk.
+// We aggregate to a city total + high-risk count for use as a live
+// multiplier in the deterministic risk model.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -8,35 +9,40 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// FEMA NFHL public ArcGIS service, layer 28 = S_Fld_Haz_Ar
-const NFHL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
+const SOCRATA = "https://data.cityofnewyork.us/resource/mrjc-v9pm.json";
 
-// NYC county DFIRM IDs (state 36 + county FIPS)
-const NYC_COUNTIES = ["36005C", "36047C", "36061C", "36081C", "36085C"];
-
-const arcgis = async (where: string) => {
-  const url = `${NFHL}?where=${encodeURIComponent(where)}&returnCountOnly=true&f=json`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`FEMA ${r.status}`);
-  const j = await r.json();
-  return Number(j.count ?? 0);
+const fetchJson = async (qs: string) => {
+  const r = await fetch(`${SOCRATA}?${qs}`, { headers: { Accept: "application/json" } });
+  if (!r.ok) throw new Error(`NYC OD ${r.status}`);
+  return await r.json();
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const countyClause = NYC_COUNTIES.map((c) => `DFIRM_ID LIKE '${c}%'`).join(" OR ");
-    const total = await arcgis(`(${countyClause})`);
-    const high = await arcgis(`(${countyClause}) AND (FLD_ZONE LIKE 'V%' OR FLD_ZONE LIKE 'A%')`);
-    const veZone = await arcgis(`(${countyClause}) AND FLD_ZONE LIKE 'V%'`);
-    const aeZone = await arcgis(`(${countyClause}) AND FLD_ZONE LIKE 'A%'`);
+    const fshri = await fetchJson("$select=fshri,count(*) AS n&$group=fshri") as Array<{ fshri?: string; n: string }>;
+    const surge = await fetchJson("$select=ss_80s,count(*) AS n&$group=ss_80s") as Array<{ ss_80s?: string; n: string }>;
+
+    let total = 0;
+    let high = 0;
+    const byIndex: Record<string, number> = {};
+    for (const r of fshri) {
+      const k = r.fshri ?? "0";
+      const n = Number(r.n ?? 0);
+      byIndex[k] = n;
+      total += n;
+      if (Number(k) >= 4) high += n;
+    }
+    const surgeBy: Record<string, number> = {};
+    for (const r of surge) surgeBy[r.ss_80s ?? "0"] = Number(r.n ?? 0);
 
     const payload = {
-      totalParcels: total,
-      highRiskParcels: high,
+      totalParcels: total,                    // census tracts evaluated
+      highRiskParcels: high,                  // FSHRI ≥ 4
       highRiskShare: total > 0 ? high / total : 0,
-      byZone: { V: veZone, A: aeZone, OTHER: Math.max(0, total - veZone - aeZone) },
-      dataset: "FEMA NFHL S_Fld_Haz_Ar — NYC five counties",
+      byZone: byIndex,                        // FSHRI 1..5 distribution
+      surge2080: surgeBy,                     // storm surge 2080s 1..5
+      dataset: "NYC Flood Vulnerability Index (mrjc-v9pm)",
     };
 
     const supabase = createClient(
