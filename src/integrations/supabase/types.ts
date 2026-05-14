@@ -14,7 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      live_data_cache: {
+        Row: {
+          created_at: string
+          fetched_at: string
+          id: string
+          payload: Json
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          payload: Json
+          source: string
+        }
+        Update: {
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          payload?: Json
+          source?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
