@@ -1,7 +1,6 @@
-// NYC Open Data — FEMA Preliminary Flood Insurance Rate Map zones
-// Counts total flood-zone polygons and identifies high-risk (V/A) zones.
-// Dataset: https://data.cityofnewyork.us/resource/mc5h-5freedom.json (FIRM 2015)
-// We use the public Socrata endpoint; no auth required.
+// FEMA National Flood Hazard Layer (NFHL) — Flood Hazard Areas (S_Fld_Haz_Ar)
+// Filtered to the five NYC counties via DFIRM_ID prefix 36 (NY) and county codes.
+// Returns total polygon count + high-risk (V/A zones) count for the city.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -9,36 +8,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// FEMA Effective FIRM flood hazard zones for NYC (Socrata)
-const DATASET = "https://data.cityofnewyork.us/resource/mc5h-5frd.json";
+// FEMA NFHL public ArcGIS service, layer 28 = S_Fld_Haz_Ar
+const NFHL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
+
+// NYC county DFIRM IDs (state 36 + county FIPS)
+const NYC_COUNTIES = ["36005C", "36047C", "36061C", "36081C", "36085C"];
+
+const arcgis = async (where: string) => {
+  const url = `${NFHL}?where=${encodeURIComponent(where)}&returnCountOnly=true&f=json`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`FEMA ${r.status}`);
+  const j = await r.json();
+  return Number(j.count ?? 0);
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    // Fetch a counts breakdown by FLD_ZONE
-    const url = `${DATASET}?$select=fld_zone,count(*)&$group=fld_zone&$limit=200`;
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!r.ok) throw new Error(`NYC OD ${r.status}`);
-    const rows = await r.json() as Array<{ fld_zone?: string; count_fld_zone?: string; count?: string }>;
-
-    let total = 0;
-    let high = 0;
-    const byZone: Record<string, number> = {};
-    for (const row of rows) {
-      const zone = (row.fld_zone ?? "UNK").toUpperCase();
-      const n = Number(row.count_fld_zone ?? row.count ?? 0);
-      byZone[zone] = n;
-      total += n;
-      // V = coastal high hazard (waves), A = 1% annual chance flood
-      if (zone.startsWith("V") || zone.startsWith("A")) high += n;
-    }
+    const countyClause = NYC_COUNTIES.map((c) => `DFIRM_ID LIKE '${c}%'`).join(" OR ");
+    const total = await arcgis(`(${countyClause})`);
+    const high = await arcgis(`(${countyClause}) AND (FLD_ZONE LIKE 'V%' OR FLD_ZONE LIKE 'A%')`);
+    const veZone = await arcgis(`(${countyClause}) AND FLD_ZONE LIKE 'V%'`);
+    const aeZone = await arcgis(`(${countyClause}) AND FLD_ZONE LIKE 'A%'`);
 
     const payload = {
       totalParcels: total,
       highRiskParcels: high,
       highRiskShare: total > 0 ? high / total : 0,
-      byZone,
-      dataset: "FEMA Effective FIRM (NYC)",
+      byZone: { V: veZone, A: aeZone, OTHER: Math.max(0, total - veZone - aeZone) },
+      dataset: "FEMA NFHL S_Fld_Haz_Ar — NYC five counties",
     };
 
     const supabase = createClient(
