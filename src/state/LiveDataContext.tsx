@@ -3,6 +3,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { setLiveAdjustments } from "@/data/nyc";
 
 export interface NoaaSeaLevel {
   station: string;          // "8518750" (The Battery, NYC)
@@ -16,6 +17,7 @@ export interface NoaaSeaLevel {
 export interface NycFloodZone {
   totalParcels: number;
   highRiskParcels: number;
+  highRiskShare: number;
   fetchedAt: string;
 }
 
@@ -68,13 +70,23 @@ export const LiveDataProvider = ({ children }: { children: ReactNode }) => {
         }
         if (row.source === "nyc_flood_zones") {
           const p = row.payload as Record<string, unknown>;
+          const total = Number(p.totalParcels ?? 0);
+          const high = Number(p.highRiskParcels ?? 0);
           setFlood({
-            totalParcels: Number(p.totalParcels ?? 0),
-            highRiskParcels: Number(p.highRiskParcels ?? 0),
+            totalParcels: total,
+            highRiskParcels: high,
+            highRiskShare: Number(p.highRiskShare ?? (total > 0 ? high / total : 0)),
             fetchedAt: String(row.fetched_at),
           });
         }
       }
+      // Push live numbers into the deterministic risk model.
+      setLiveAdjustments({
+        noaaTrendMmPerYr: (data ?? []).find((r) => r.source === "noaa_battery")
+          ? Number((((data ?? []).find((r) => r.source === "noaa_battery")!.payload) as Record<string, unknown>).trendMmPerYr ?? 0) : undefined,
+        nycHighRiskShare: (data ?? []).find((r) => r.source === "nyc_flood_zones")
+          ? Number((((data ?? []).find((r) => r.source === "nyc_flood_zones")!.payload) as Record<string, unknown>).highRiskShare ?? 0) : undefined,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

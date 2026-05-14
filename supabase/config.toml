@@ -1,1 +1,7 @@
 project_id = "nybhqivokxrhdnftfnkx"
+
+[functions.noaa-sea-level]
+verify_jwt = false
+
+[functions.nyc-flood-zones]
+verify_jwt = false

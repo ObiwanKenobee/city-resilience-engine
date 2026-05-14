@@ -146,6 +146,18 @@ const yearFactor = (year: number) => {
   return t * t * (3 - 2 * t); // smoothstep
 };
 
+// Live data adjustments — set by LiveDataContext when NOAA + NYC OD data loads.
+// Mutates the deterministic baseline so the LIVE pill actually shifts numbers.
+interface LiveAdjust {
+  // NOAA-observed sea-level trend in mm/yr (Battery station). Baseline ~3.0
+  noaaTrendMmPerYr?: number;
+  // Share of NYC census tracts at FSHRI ≥ 4. Baseline ~0.35
+  nycHighRiskShare?: number;
+}
+let LIVE: LiveAdjust = {};
+export const setLiveAdjustments = (a: LiveAdjust) => { LIVE = a; };
+export const getLiveAdjustments = (): LiveAdjust => LIVE;
+
 export const computeRisk = (
   district: District,
   scenarioId: ScenarioId,
@@ -155,7 +167,10 @@ export const computeRisk = (
   const t = yearFactor(year);
   // Elevation dampens flood; population dampens nothing; coastline distance baked into elevation.
   const elevDamp = Math.max(0.15, 1 - district.baseElevation / 30);
-  const flood = Math.min(1, scenario.intensity * t * elevDamp * 1.15);
+  // Live multipliers: stronger NOAA trend → stronger flood; higher city flood share → stronger flood.
+  const seaLevelMul = LIVE.noaaTrendMmPerYr ? Math.max(0.7, Math.min(1.6, LIVE.noaaTrendMmPerYr / 3.0)) : 1;
+  const cityFloodMul = LIVE.nycHighRiskShare ? Math.max(0.8, Math.min(1.4, LIVE.nycHighRiskShare / 0.35)) : 1;
+  const flood = Math.min(1, scenario.intensity * t * elevDamp * 1.15 * seaLevelMul * cityFloodMul);
   const heat = Math.min(1, scenario.intensity * t * (0.55 + (district.population / 1500)));
   // Infra failure = flood + heat coupled
   const infrastructure = Math.min(1, 0.6 * flood + 0.5 * heat);

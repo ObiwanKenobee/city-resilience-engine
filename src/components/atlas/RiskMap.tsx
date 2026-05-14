@@ -62,6 +62,19 @@ export const RiskMap = ({ scenario, year, selected, onSelect, layer }: Props) =>
         <div className="flex justify-between mt-1 text-[9px] font-mono text-muted-foreground">
           <span>LOW</span><span>MODERATE</span><span>HIGH</span><span>EXTREME</span>
         </div>
+        {whatIfActive && (
+          <div className="mt-2 pt-2 border-t border-border/60 flex items-center gap-2 text-[9px] font-mono">
+            <div className="flex-1 flex items-center gap-1.5">
+              <span className="inline-block w-3 h-2 rounded-sm bg-foreground/70" />
+              <span className="tracking-[0.18em] text-muted-foreground">BASELINE</span>
+            </div>
+            <span className="text-muted-foreground/70">│</span>
+            <div className="flex-1 flex items-center gap-1.5 justify-end">
+              <span className="tracking-[0.18em] text-muted-foreground">MITIGATED</span>
+              <span className="inline-block w-3 h-2 rounded-sm bg-risk-low/80" />
+            </div>
+          </div>
+        )}
       </div>
 
       <svg viewBox="0 0 1000 1000" className="w-full h-full">
