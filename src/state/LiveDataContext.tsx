@@ -3,6 +3,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { setLiveAdjustments } from "@/data/nyc";
 
 export interface NoaaSeaLevel {
   station: string;          // "8518750" (The Battery, NYC)
@@ -16,6 +17,7 @@ export interface NoaaSeaLevel {
 export interface NycFloodZone {
   totalParcels: number;
   highRiskParcels: number;
+  highRiskShare: number;
   fetchedAt: string;
 }
 
