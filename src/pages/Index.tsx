@@ -1,19 +1,48 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { TopBar } from "@/components/atlas/TopBar";
 import { RiskMap } from "@/components/atlas/RiskMap";
 import { ScenarioPanel } from "@/components/atlas/ScenarioPanel";
 import { DecisionPanel } from "@/components/atlas/DecisionPanel";
 import { Ticker } from "@/components/atlas/Ticker";
 import { WhatIfSimulator } from "@/components/atlas/WhatIfSimulator";
-import type { DistrictId, ScenarioId } from "@/data/nyc";
+import { DISTRICTS, SCENARIOS, type DistrictId, type ScenarioId } from "@/data/nyc";
+
+const VALID_LAYERS = ["composite", "flood", "heat", "infrastructure"] as const;
+type Layer = typeof VALID_LAYERS[number];
 
 const Index = () => {
-  const [scenario, setScenario] = useState<ScenarioId>("rcp85");
-  const [year, setYear] = useState(2050);
-  const [selected, setSelected] = useState<DistrictId | null>("lower-manhattan");
-  const [layer, setLayer] = useState<"composite" | "flood" | "heat" | "infrastructure">("composite");
+  const [params, setParams] = useSearchParams();
+
+  const [scenario, setScenario] = useState<ScenarioId>(() => {
+    const s = params.get("scenario") as ScenarioId | null;
+    return s && SCENARIOS.some((x) => x.id === s) ? s : "rcp85";
+  });
+  const [year, setYear] = useState<number>(() => {
+    const y = Number(params.get("year"));
+    return Number.isFinite(y) && y >= 2025 && y <= 2150 ? y : 2050;
+  });
+  const [selected, setSelected] = useState<DistrictId | null>(() => {
+    const d = params.get("district") as DistrictId | null;
+    return d && DISTRICTS.some((x) => x.id === d) ? d : "lower-manhattan";
+  });
+  const [layer, setLayer] = useState<Layer>(() => {
+    const l = params.get("layer") as Layer | null;
+    return l && VALID_LAYERS.includes(l) ? l : "composite";
+  });
   const [whatIfOpen, setWhatIfOpen] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
+
+  // Mirror state into URL so the QR code + Share link round-trip in a new tab.
+  useEffect(() => {
+    const next = new URLSearchParams(params);
+    next.set("scenario", scenario);
+    next.set("year", String(year));
+    if (selected) next.set("district", selected); else next.delete("district");
+    next.set("layer", layer);
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario, year, selected, layer]);
 
   return (
     <div className="dark min-h-screen flex flex-col bg-background text-foreground">
